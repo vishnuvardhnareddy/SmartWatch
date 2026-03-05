@@ -45,6 +45,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def root():
+    return {"status": "NutriVitals Backend is Live!", "model_loaded": health_score_model is not None}
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- Helper: Get Today's Date String ---
