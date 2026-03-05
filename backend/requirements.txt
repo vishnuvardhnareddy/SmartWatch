@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+motor
+pydantic[email]
+python-dotenv
+google-generativeai
+bcrypt
+passlib
+scikit-learn
+joblib
+numpy
+pandas
