@@ -77,10 +77,32 @@ async def signup(user: UserSignup):
 
 @app.post("/login")
 async def login(user: dict = Body(...)):
-    db_user = await user_collection.find_one({"email": user['email']})
-    if not db_user or not pwd_context.verify(user['password'], db_user["password"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return {"status": "success", "username": db_user["username"], "email": db_user["email"]}
+    try:
+        email = user.get('email')
+        password = user.get('password')
+        
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password required")
+            
+        db_user = await user_collection.find_one({"email": email})
+        
+        if not db_user:
+             raise HTTPException(status_code=401, detail="Invalid credentials")
+             
+        # Verify password
+        if not pwd_context.verify(password, db_user.get("password", "")):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+            
+        return {
+            "status": "success", 
+            "username": db_user.get("username", db_user.get("name", "User")), 
+            "email": db_user.get("email")
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Login Crash: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 # --- Smart Nutrition Analysis & Storage ---
 @app.post("/analyze-nutrition")
