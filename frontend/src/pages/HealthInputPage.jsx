@@ -1,4 +1,3 @@
-import axios from "axios";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -10,6 +9,7 @@ import {
   Thermometer,
 } from "lucide-react";
 import { useState } from "react";
+import axiosClient from "../api/axiosClient";
 
 const InputField = ({
   icon: Icon,
@@ -80,7 +80,7 @@ export default function HealthInputPage() {
         payload.height = parseFloat(formData.height);
       }
 
-      await axios.post("http://localhost:8000/save-health-inputs", payload);
+      await axiosClient.post("/save-health-inputs", payload);
 
       setStatus({
         type: "success",

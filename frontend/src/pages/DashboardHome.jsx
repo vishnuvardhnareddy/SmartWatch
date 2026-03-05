@@ -1,4 +1,3 @@
-import axios from "axios";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -13,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import axiosClient from "../api/axiosClient";
 
 const HealthCard = ({ icon: Icon, title, value, unit, status, color }) => (
   <motion.div
@@ -114,9 +114,7 @@ export default function DashboardHome() {
     const fetchStats = async () => {
       try {
         const email = localStorage.getItem("email") || "demo-user";
-        const response = await axios.get(
-          `http://localhost:8000/user/health-stats/${email}`,
-        );
+        const response = await axiosClient.get(`/user/health-stats/${email}`);
         setStats(response.data);
       } catch (error) {
         console.error("Error fetching health data:", error);
@@ -179,7 +177,7 @@ export default function DashboardHome() {
                     : "dinner";
 
               try {
-                const res = await axios.post("http://localhost:8000/log-meal", {
+                const res = await axiosClient.post("/log-meal", {
                   email: localStorage.getItem("email") || "demo-user",
                   mealType,
                   foodDesc: input,

@@ -1,4 +1,3 @@
-import axios from "axios";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -19,6 +18,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import axiosClient from "../api/axiosClient";
 
 // Hardcoded data removed, using state now
 
@@ -66,9 +66,7 @@ export default function WorkoutPage() {
   const fetchStats = async () => {
     try {
       const email = localStorage.getItem("email") || "demo-user";
-      const res = await axios.get(
-        `http://localhost:8000/user/health-stats/${email}`,
-      );
+      const res = await axiosClient.get(`/user/health-stats/${email}`);
       setStats({
         steps: res.data.steps,
         calories: res.data.calories,
@@ -82,9 +80,7 @@ export default function WorkoutPage() {
   const fetchWeeklyActivity = async () => {
     try {
       const email = localStorage.getItem("email") || "demo-user";
-      const res = await axios.get(
-        `http://localhost:8000/weekly-activity/${email}`,
-      );
+      const res = await axiosClient.get(`/weekly-activity/${email}`);
       setWeeklyData(res.data);
     } catch (err) {
       console.error("Weekly activity fetch failed", err);
@@ -99,7 +95,7 @@ export default function WorkoutPage() {
       // Calculate pending calories deterministically if we have real stats
       let pendingCals = "250";
 
-      const res = await axios.post("http://localhost:8000/workout-insight", {
+      const res = await axiosClient.post("/workout-insight", {
         email: userEmail,
         heartRate: 72,
         steps: stats.steps === "Upcoming" ? 8432 : stats.steps,
@@ -108,8 +104,8 @@ export default function WorkoutPage() {
 
       // Try to get actual DB nutrition logic if available
       try {
-        const dbStats = await axios.get(
-          `http://localhost:8000/user/health-stats/${userEmail}`,
+        const dbStats = await axiosClient.get(
+          `/user/health-stats/${userEmail}`,
         );
         const foodCalories = dbStats.data.total_food_calories || 0;
         const burnedCalories = dbStats.data.calories_burned || 0;
