@@ -20,15 +20,7 @@ import {
   YAxis,
 } from "recharts";
 
-const data = [
-  { name: "Mon", steps: 4000 },
-  { name: "Tue", steps: 3000 },
-  { name: "Wed", steps: 5000 },
-  { name: "Thu", steps: 2780 },
-  { name: "Fri", steps: 1890 },
-  { name: "Sat", steps: 2390 },
-  { name: "Sun", steps: 3490 },
-];
+// Hardcoded data removed, using state now
 
 const StatCard = ({ icon: Icon, title, value, color, delay }) => (
   <motion.div
@@ -68,27 +60,45 @@ export default function WorkoutPage() {
     calories: "--",
     time: "--",
   });
+  const [weeklyData, setWeeklyData] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const fetchStats = async () => {
     try {
+      const email = localStorage.getItem("email") || "demo-user";
       const res = await axios.get(
-        "http://localhost:8000/user/health-stats/demo-user",
+        `http://localhost:8000/user/health-stats/${email}`,
       );
       setStats({
         steps: res.data.steps,
-        calories: "420 kcal",
-        time: "45 mins",
+        calories: res.data.calories,
+        time: res.data.time,
       });
     } catch (err) {
       console.error("Stats fetch failed", err);
     }
   };
 
+  const fetchWeeklyActivity = async () => {
+    try {
+      const email = localStorage.getItem("email") || "demo-user";
+      const res = await axios.get(
+        `http://localhost:8000/weekly-activity/${email}`,
+      );
+      setWeeklyData(res.data);
+    } catch (err) {
+      console.error("Weekly activity fetch failed", err);
+    }
+  };
+
   const fetchWorkoutAdvice = async () => {
     setLoading(true);
     try {
-      const userEmail = localStorage.getItem("email"); // DB storage logic kosam
+      const userEmail = localStorage.getItem("email") || "demo-user";
+
+      // Calculate pending calories deterministically if we have real stats
+      let pendingCals = "250";
+
       const res = await axios.post("http://localhost:8000/workout-insight", {
         email: userEmail,
         heartRate: 72,
@@ -96,10 +106,27 @@ export default function WorkoutPage() {
         waterIntake: 1.5,
       });
 
-      // Backend logic nundi caloriesToBurn and tip vastundi
+      // Try to get actual DB nutrition logic if available
+      try {
+        const dbStats = await axios.get(
+          `http://localhost:8000/user/health-stats/${userEmail}`,
+        );
+        const foodCalories = dbStats.data.total_food_calories || 0;
+        const burnedCalories = dbStats.data.calories_burned || 0;
+
+        // Base burn target is 500. Add any surplus calories from food.
+        // Assuming 2000 is base BMR allowance.
+        const surplus = Math.max(0, foodCalories - 2000);
+        const target = 500 + surplus;
+
+        pendingCals = Math.max(0, target - burnedCalories).toString();
+      } catch (_e) {
+        console.log("Could not fetch db stats for calorie calculation");
+      }
+
       if (res.data && res.data.data) {
         setAiData({
-          caloriesToBurn: res.data.data.caloriesToBurn || "250",
+          caloriesToBurn: pendingCals,
           tip: res.data.data.tip || res.data.data.insight,
         });
       }
@@ -112,6 +139,7 @@ export default function WorkoutPage() {
 
   useEffect(() => {
     fetchStats();
+    fetchWeeklyActivity();
     fetchWorkoutAdvice();
   }, []);
 
@@ -165,7 +193,7 @@ export default function WorkoutPage() {
           </h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
+              <BarChart data={weeklyData}>
                 <XAxis
                   dataKey="name"
                   stroke="#94a3b8"
@@ -189,10 +217,12 @@ export default function WorkoutPage() {
                   }}
                 />
                 <Bar dataKey="steps" radius={[4, 4, 0, 0]}>
-                  {data.map((entry, index) => (
+                  {weeklyData.map((entry, index) => (
                     <Cell
                       key={`cell-${index}`}
-                      fill={index === data.length - 1 ? "#10b981" : "#cbd5e1"}
+                      fill={
+                        index === weeklyData.length - 1 ? "#10b981" : "#cbd5e1"
+                      }
                     />
                   ))}
                 </Bar>
@@ -210,7 +240,7 @@ export default function WorkoutPage() {
           >
             <div className="flex items-center gap-2 mb-4">
               <Zap size={20} className="text-yellow-400 fill-yellow-400" />
-              <h3 className="font-bold text-lg">Daily Burn Target</h3>
+              <h3 className="font-bold text-lg">Today Burn</h3>
             </div>
 
             <div className="mb-6">

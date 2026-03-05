@@ -9,6 +9,7 @@ import {
   Footprints,
   Heart,
   ThumbsUp,
+  Utensils,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -100,6 +101,7 @@ export default function DashboardHome() {
     bloodPressure: "--/--",
     steps: "Upcoming",
     healthScore: "--",
+    bmi: null,
     status: {
       heart: "Loading",
       bp: "Loading",
@@ -111,8 +113,9 @@ export default function DashboardHome() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        const email = localStorage.getItem("email") || "demo-user";
         const response = await axios.get(
-          "http://localhost:8000/user/health-stats/demo-user",
+          `http://localhost:8000/user/health-stats/${email}`,
         );
         setStats(response.data);
       } catch (error) {
@@ -137,8 +140,101 @@ export default function DashboardHome() {
         </p>
       </motion.div>
 
+      {/* Quick Meal Logger */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col md:flex-row items-center justify-between gap-6"
+      >
+        <div className="flex-1 w-full relative">
+          <div className="flex items-center gap-2 mb-2">
+            <Utensils size={18} className="text-emerald-500" />
+            <h3 className="font-bold text-slate-800 dark:text-white">
+              Quick Log
+            </h3>
+            <span className="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full font-medium">
+              {new Date().getHours() < 11
+                ? "Breakfast"
+                : new Date().getHours() < 16
+                  ? "Lunch"
+                  : "Dinner"}
+            </span>
+          </div>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const input = e.target.mealInput.value;
+              if (!input) return;
+
+              const btn = e.target.submitBtn;
+              btn.disabled = true;
+              btn.innerText = "Analyzing...";
+
+              const mealType =
+                new Date().getHours() < 11
+                  ? "breakfast"
+                  : new Date().getHours() < 16
+                    ? "lunch"
+                    : "dinner";
+
+              try {
+                const res = await axios.post("http://localhost:8000/log-meal", {
+                  email: localStorage.getItem("email") || "demo-user",
+                  mealType,
+                  foodDesc: input,
+                });
+                if (res.data.status === "success") {
+                  setStats((prev) => ({
+                    ...prev,
+                    total_food_calories: res.data.new_total,
+                  }));
+                  e.target.reset();
+                  alert(
+                    `Added ${res.data.added_calories} kcal for your ${mealType}!`,
+                  );
+                }
+              } catch (err) {
+                console.error(err);
+              } finally {
+                btn.disabled = false;
+                btn.innerText = "Log & Analyze";
+              }
+            }}
+            className="flex gap-3"
+          >
+            <input
+              name="mealInput"
+              type="text"
+              placeholder="E.g., 2 idlis with sambar and a banana"
+              className="flex-1 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 outline-none w-full text-slate-900 dark:text-white"
+            />
+            <button
+              name="submitBtn"
+              type="submit"
+              className="bg-emerald-500 text-white px-6 py-3 rounded-xl text-sm font-semibold hover:bg-emerald-600 transition-colors whitespace-nowrap"
+            >
+              Log & Analyze
+            </button>
+          </form>
+        </div>
+        <div className="flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl min-w-[140px]">
+          <span className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold mb-1">
+            Today's Intake
+          </span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-2xl font-bold text-slate-800 dark:text-white">
+              {stats.total_food_calories || 0}
+            </span>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+              kcal
+            </span>
+          </div>
+        </div>
+      </motion.div>
+
       {/* Health Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         <HealthCard
           icon={Heart}
           title="Heart Rate"
@@ -162,6 +258,20 @@ export default function DashboardHome() {
           unit=""
           status={stats.status.steps}
           color="bg-orange-50 text-orange-600"
+        />
+        <HealthCard
+          icon={Activity}
+          title="BMI"
+          value={stats.bmi || "--"}
+          unit=""
+          status={
+            stats.bmi
+              ? stats.bmi >= 18.5 && stats.bmi <= 24.9
+                ? "Normal"
+                : "Review"
+              : "Pending"
+          }
+          color="bg-purple-50 text-purple-600"
         />
         <HealthCard
           icon={ThumbsUp}

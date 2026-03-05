@@ -1,0 +1,71 @@
+
+> smartwatch@0.0.0 lint
+> eslint .
+
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\components\Navbar.jsx
+   1:27  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           no-unused-vars
+  15:7   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  13 |     const storedName = localStorage.getItem("username");
+  14 |     if (storedName) {
+> 15 |       setUserName(storedName);
+     |       ^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  16 |     }
+  17 |   }, []);
+  18 |  react-hooks/set-state-in-effect
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\components\Sidebar.jsx
+  1:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\DashboardHome.jsx
+   2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  16:29  error  'Icon' is defined but never used                                               no-unused-vars
+  66:9   error  'Icon' is defined but never used                                               no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\DietPage.jsx
+   1:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    no-unused-vars
+  47:9   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+  45 |         const parsedData = JSON.parse(savedPlan);
+  46 |         // Backend 'plan' key lo data pampisthe, ledha direct object ayithe check
+> 47 |         setPlan(parsedData.plan ? parsedData.plan : parsedData);
+     |         ^^^^^^^ Avoid calling setState() directly within an effect
+  48 |       } catch (e) {
+  49 |         console.error("Failed to parse diet plan:", e);
+  50 |       }  react-hooks/set-state-in-effect
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\HealthInputPage.jsx
+   2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  15:9   error  'Icon' is defined but never used                                               no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\InputsPage.jsx
+  1:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  8:9   error  'Icon' is defined but never used                                               no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\Login.jsx
+  1:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\Signup.jsx
+  1:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\vr450\Documents\smartWatch\frontend\src\pages\WorkoutPage.jsx
+    2:10  error    'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u                                          no-unused-vars
+   25:27  error    'Icon' is defined but never used                                                                                       no-unused-vars
+  123:16  error    '_e' is defined but never used                                                                                         no-unused-vars
+  144:6   warning  React Hook useEffect has a missing dependency: 'fetchWorkoutAdvice'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 18 problems (17 errors, 1 warning)
+
