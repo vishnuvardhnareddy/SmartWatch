@@ -111,12 +111,16 @@ async def login(user: dict = Body(...)):
         db_user = await user_collection.find_one({"email": email})
         
         if not db_user:
-             raise HTTPException(status_code=401, detail="Invalid credentials")
+             print(f"Login Failed: User with email {email} not found.")
+             raise HTTPException(status_code=401, detail="Email not found")
              
         # Verify password
-        if not pwd_context.verify(password, db_user.get("password", "")):
-            raise HTTPException(status_code=401, detail="Invalid credentials")
+        is_verified = pwd_context.verify(password, db_user.get("password", ""))
+        if not is_verified:
+            print(f"Login Failed: Password verification failed for {email}.")
+            raise HTTPException(status_code=401, detail="Incorrect password")
             
+        print(f"Login Successful for {email}")
         return {
             "status": "success", 
             "username": db_user.get("username", db_user.get("name", "User")), 
