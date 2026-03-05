@@ -47,7 +47,19 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"status": "NutriVitals Backend is Live!", "model_loaded": health_score_model is not None}
+    db_status = "Unknown"
+    try:
+        # Ping the database to check connectivity
+        await database.command("ping")
+        db_status = "Connected"
+    except Exception as e:
+        db_status = f"Failed: {str(e)}"
+    
+    return {
+        "status": "NutriVitals Backend is Live!",
+        "database": db_status,
+        "model_loaded": health_score_model is not None
+    }
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -69,11 +81,23 @@ class UserSignup(BaseModel):
 
 @app.post("/signup")
 async def signup(user: UserSignup):
-    existing_user = await user_collection.find_one({"email": user.email})
-    if existing_user: raise HTTPException(status_code=400, detail="Email exists!")
-    hashed_pwd = pwd_context.hash(user.password)
-    await user_collection.insert_one({"username": user.name, "email": user.email, "password": hashed_pwd})
-    return {"status": "success"}
+    try:
+        existing_user = await user_collection.find_one({"email": user.email})
+        if existing_user: 
+            raise HTTPException(status_code=400, detail="Email exists!")
+        
+        hashed_pwd = pwd_context.hash(user.password)
+        await user_collection.insert_one({
+            "username": user.name, 
+            "email": user.email, 
+            "password": hashed_pwd
+        })
+        return {"status": "success"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"Signup Error: {str(e)}")
+        return {"status": "error", "message": f"Database or Server error: {str(e)}"}
 
 @app.post("/login")
 async def login(user: dict = Body(...)):
