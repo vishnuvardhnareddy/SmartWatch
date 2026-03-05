@@ -82,28 +82,40 @@ class UserSignup(BaseModel):
 @app.post("/signup")
 async def signup(user: UserSignup):
     try:
-        existing_user = await user_collection.find_one({"email": user.email})
+        email_normalized = user.email.lower().strip()
+        print(f"Signup Attempt: {email_normalized}")
+        
+        existing_user = await user_collection.find_one({"email": email_normalized})
         if existing_user: 
+            print(f"Signup Failed: {email_normalized} already exists")
             raise HTTPException(status_code=400, detail="Email exists!")
         
-        hashed_pwd = pwd_context.hash(user.password)
-        await user_collection.insert_one({
+        # Use direct bcrypt for hashing (more reliable on Render)
+        password_bytes = user.password.encode('utf-8')
+        salt = bcrypt.gensalt()
+        hashed_pwd = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+        
+        result = await user_collection.insert_one({
             "username": user.name, 
-            "email": user.email, 
-            "password": hashed_pwd
+            "email": email_normalized, 
+            "password": hashed_pwd,
+            "created_at": datetime.now()
         })
+        print(f"Signup Successful: Created user {email_normalized} with ID {result.inserted_id}")
         return {"status": "success"}
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Signup Error: {str(e)}")
-        return {"status": "error", "message": f"Database or Server error: {str(e)}"}
+        print(f"Signup Error for {user.email}: {str(e)}")
+        return {"status": "error", "message": f"Server error: {str(e)}"}
 
 @app.post("/login")
 async def login(user: dict = Body(...)):
     try:
-        email = user.get('email')
-        password = user.get('password')
+        email = user.get('email', '').lower().strip()
+        password = user.get('password', '')
+        
+        print(f"Login Attempt: {email}")
         
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email and password required")
@@ -111,16 +123,19 @@ async def login(user: dict = Body(...)):
         db_user = await user_collection.find_one({"email": email})
         
         if not db_user:
-             print(f"Login Failed: User with email {email} not found.")
+             print(f"Login Failed: No user found with email '{email}'")
              raise HTTPException(status_code=401, detail="Email not found")
              
-        # Verify password
-        is_verified = pwd_context.verify(password, db_user.get("password", ""))
-        if not is_verified:
-            print(f"Login Failed: Password verification failed for {email}.")
+        # Verify password using direct bcrypt
+        stored_password = db_user.get("password", "")
+        password_bytes = password.encode('utf-8')
+        stored_password_bytes = stored_password.encode('utf-8')
+        
+        if not bcrypt.checkpw(password_bytes, stored_password_bytes):
+            print(f"Login Failed: Incorrect password for {email}")
             raise HTTPException(status_code=401, detail="Incorrect password")
             
-        print(f"Login Successful for {email}")
+        print(f"Login Successful: {email}")
         return {
             "status": "success", 
             "username": db_user.get("username", db_user.get("name", "User")), 
@@ -129,7 +144,7 @@ async def login(user: dict = Body(...)):
     except HTTPException as e:
         raise e
     except Exception as e:
-        print(f"Login Crash: {str(e)}")
+        print(f"Login Crash for {email}: {str(e)}")
         return {"status": "error", "message": str(e)}
 
 # --- Smart Nutrition Analysis & Storage ---
