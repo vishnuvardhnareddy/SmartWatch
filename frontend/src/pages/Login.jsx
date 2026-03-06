@@ -15,6 +15,7 @@ export default function Login() {
       const response = await axiosClient.post("/login", { email, password });
       if (response.data.status === "success") {
         localStorage.setItem("username", response.data.username);
+        localStorage.setItem("email", response.data.email);
         navigate("/dashboard");
       }
     } catch (error) {

@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Award, Utensils } from "lucide-react";
 import { useEffect, useState } from "react";
+import axiosClient from "../api/axiosClient";
 
 // --- Sub-component: MealCard ---
 const MealCard = ({ title, calories, items, color, delay }) => (
@@ -37,18 +38,32 @@ export default function DietPage() {
   const [plan, setPlan] = useState(null);
 
   useEffect(() => {
-    // LocalStorage nundi data teeskune mundu safety checks
-    const savedPlan = localStorage.getItem("dietPlan");
-
-    if (savedPlan && savedPlan !== "undefined" && savedPlan !== "null") {
+    const fetchPlan = async () => {
       try {
-        const parsedData = JSON.parse(savedPlan);
-        // Backend 'plan' key lo data pampisthe, ledha direct object ayithe check
-        setPlan(parsedData.plan ? parsedData.plan : parsedData);
-      } catch (e) {
-        console.error("Failed to parse diet plan:", e);
+        // 1. Try fetching from DB first
+        const email = localStorage.getItem("email") || "demo-user";
+        const res = await axiosClient.get(`/get-diet-plan/${email}`);
+        if (res.data.status === "success" && res.data.plan) {
+          setPlan(res.data.plan);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch diet plan from DB:", err);
       }
-    }
+
+      // 2. Fallback to localStorage
+      const savedPlan = localStorage.getItem("dietPlan");
+      if (savedPlan && savedPlan !== "undefined" && savedPlan !== "null") {
+        try {
+          const parsedData = JSON.parse(savedPlan);
+          setPlan(parsedData.plan ? parsedData.plan : parsedData);
+        } catch (e) {
+          console.error("Failed to parse diet plan:", e);
+        }
+      }
+    };
+
+    fetchPlan();
   }, []);
 
   // AI data lenappudu kanipinche Default Indian Diet Plan

@@ -3,11 +3,12 @@ import {
   Activity,
   ClipboardList,
   Dumbbell,
+  FileText,
   Home,
   LogOut,
   Utensils,
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 const menuItems = [
   { icon: Home, label: "Dashboard", path: "/dashboard" },
@@ -15,10 +16,19 @@ const menuItems = [
   { icon: ClipboardList, label: "Daily Inputs", path: "/dashboard/inputs" },
   { icon: Utensils, label: "Diet Plan", path: "/dashboard/diet" },
   { icon: Dumbbell, label: "Workout AI", path: "/dashboard/workout" },
+  { icon: FileText, label: "Email Report", path: "/dashboard/report" },
 ];
 
 export default function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem("username");
+    localStorage.removeItem("email");
+    localStorage.removeItem("dietPlan");
+    navigate("/login");
+  };
 
   return (
     <div className="h-screen w-64 bg-white dark:bg-slate-800 border-r border-slate-100 dark:border-slate-700 flex flex-col p-6 fixed left-0 top-0 z-20">
@@ -58,7 +68,10 @@ export default function Sidebar() {
 
       {/* Bottom Section */}
       <div className="mt-auto pt-6 border-t border-slate-100 dark:border-slate-700">
-        <button className="flex items-center gap-3 px-4 py-3 text-slate-500 dark:text-slate-400 hover:text-red-500 transition-colors w-full">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-4 py-3 text-slate-500 dark:text-slate-400 hover:text-red-500 transition-colors w-full"
+        >
           <LogOut size={20} />
           <span>Logout</span>
         </button>

@@ -49,11 +49,10 @@ export default function InputsPage() {
 
   const handleAnalyze = async () => {
     setLoading(true);
+    const email = localStorage.getItem("email") || "demo-user";
     const payload = {
       ...meals,
-      heartRate: 72, // Mock hardware vitals
-      bloodPressure: "120/80",
-      steps: 4500,
+      email: email,
     };
 
     try {

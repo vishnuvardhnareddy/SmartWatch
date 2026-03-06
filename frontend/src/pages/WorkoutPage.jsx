@@ -3,12 +3,14 @@ import {
   Activity,
   AlertCircle,
   Clock,
+  Dumbbell,
   Flame,
+  Plus,
   RefreshCw,
   TrendingUp,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -19,8 +21,6 @@ import {
   YAxis,
 } from "recharts";
 import axiosClient from "../api/axiosClient";
-
-// Hardcoded data removed, using state now
 
 const StatCard = ({ icon: Icon, title, value, color, delay }) => (
   <motion.div
@@ -44,10 +44,24 @@ const StatCard = ({ icon: Icon, title, value, color, delay }) => (
     </div>
     <div className="flex items-center gap-1 text-emerald-500 text-sm font-medium">
       <TrendingUp size={14} />
-      <span>+12% from yesterday</span>
+      <span>Keep it up!</span>
     </div>
   </motion.div>
 );
+
+const workoutTypes = [
+  "Walking",
+  "Running",
+  "Cycling",
+  "Yoga",
+  "Gym",
+  "Swimming",
+  "Stretching",
+  "Cardio",
+  "Dance",
+  "Sports",
+  "Other",
+];
 
 export default function WorkoutPage() {
   const [aiData, setAiData] = useState({
@@ -62,62 +76,64 @@ export default function WorkoutPage() {
   });
   const [weeklyData, setWeeklyData] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loggedWorkouts, setLoggedWorkouts] = useState([]);
 
-  const fetchStats = async () => {
-    try {
-      const email = localStorage.getItem("email") || "demo-user";
-      const res = await axiosClient.get(`/user/health-stats/${email}`);
-      setStats({
-        steps: res.data.steps,
-        calories: res.data.calories,
-        time: res.data.time,
-      });
-    } catch (err) {
-      console.error("Stats fetch failed", err);
-    }
-  };
+  // Workout input form
+  const [workoutForm, setWorkoutForm] = useState({
+    workoutType: "Walking",
+    duration: "",
+    caloriesBurned: "",
+  });
+  const [savingWorkout, setSavingWorkout] = useState(false);
 
-  const fetchWeeklyActivity = async () => {
+  const email = localStorage.getItem("email") || "demo-user";
+
+  const fetchWeeklyActivity = useCallback(async () => {
     try {
-      const email = localStorage.getItem("email") || "demo-user";
       const res = await axiosClient.get(`/weekly-activity/${email}`);
       setWeeklyData(res.data);
     } catch (err) {
       console.error("Weekly activity fetch failed", err);
     }
-  };
+  }, [email]);
 
-  const fetchWorkoutAdvice = async () => {
+  const loadAllData = useCallback(async () => {
+    let currentStats = null;
+
+    // 1. Fetch Stats (Only Once)
+    try {
+      const res = await axiosClient.get(`/user/health-stats/${email}`);
+      currentStats = res.data;
+      setStats({
+        steps: res.data.steps,
+        calories: res.data.calories,
+        time: res.data.time,
+      });
+      setLoggedWorkouts(res.data.workouts || []);
+    } catch (err) {
+      console.error("Stats fetch failed", err);
+    }
+
+    // 2. Fetch Weekly Activity (Parallel)
+    fetchWeeklyActivity();
+
+    // 3. Fetch Workout Advice using the stats we already downloaded
     setLoading(true);
     try {
-      const userEmail = localStorage.getItem("email") || "demo-user";
-
-      // Calculate pending calories deterministically if we have real stats
       let pendingCals = "250";
 
       const res = await axiosClient.post("/workout-insight", {
-        email: userEmail,
+        email: email,
         heartRate: 72,
-        steps: stats.steps === "Upcoming" ? 8432 : stats.steps,
-        waterIntake: 1.5,
+        steps: currentStats ? currentStats.steps : 0,
       });
 
-      // Try to get actual DB nutrition logic if available
-      try {
-        const dbStats = await axiosClient.get(
-          `/user/health-stats/${userEmail}`,
-        );
-        const foodCalories = dbStats.data.total_food_calories || 0;
-        const burnedCalories = dbStats.data.calories_burned || 0;
-
-        // Base burn target is 500. Add any surplus calories from food.
-        // Assuming 2000 is base BMR allowance.
+      if (currentStats) {
+        const foodCalories = currentStats.total_food_calories || 0;
+        const burnedCalories = currentStats.calories_burned || 0;
         const surplus = Math.max(0, foodCalories - 2000);
         const target = 500 + surplus;
-
         pendingCals = Math.max(0, target - burnedCalories).toString();
-      } catch (_e) {
-        console.log("Could not fetch db stats for calorie calculation");
       }
 
       if (res.data && res.data.data) {
@@ -131,13 +147,54 @@ export default function WorkoutPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, fetchWeeklyActivity]);
 
   useEffect(() => {
-    fetchStats();
-    fetchWeeklyActivity();
-    fetchWorkoutAdvice();
-  }, []);
+    loadAllData();
+  }, [loadAllData]);
+
+  const fetchWorkoutAdviceManual = async () => {
+    loadAllData(); // Refresh everything when user clicks the refresh button
+  };
+
+  const handleLogWorkout = async (e) => {
+    e.preventDefault();
+    if (!workoutForm.duration) return alert("Please enter workout duration");
+    setSavingWorkout(true);
+
+    try {
+      const res = await axiosClient.post("/log-workout", {
+        email: email,
+        workoutType: workoutForm.workoutType,
+        duration: parseInt(workoutForm.duration),
+        caloriesBurned:
+          parseInt(workoutForm.caloriesBurned) ||
+          Math.round(parseInt(workoutForm.duration) * 7),
+      });
+
+      if (res.data.status === "success") {
+        setLoggedWorkouts((prev) => [...prev, res.data.workout]);
+        setStats((prev) => ({
+          ...prev,
+          time: `${res.data.total_workout_time} mins`,
+          calories: `${res.data.total_workout_calories} kcal`,
+        }));
+        setWorkoutForm({
+          workoutType: "Walking",
+          duration: "",
+          caloriesBurned: "",
+        });
+        alert(
+          `Logged ${res.data.workout.type} for ${res.data.workout.duration} mins!`,
+        );
+      }
+    } catch (err) {
+      console.error("Log workout error:", err);
+      alert("Failed to log workout.");
+    } finally {
+      setSavingWorkout(false);
+    }
+  };
 
   return (
     <div className="space-y-8 p-2 md:p-6">
@@ -149,7 +206,7 @@ export default function WorkoutPage() {
           Workout Analytics
         </h1>
         <p className="text-slate-500 dark:text-slate-400">
-          Targeted AI advice for your fitness goals.
+          Log workouts & get AI-powered fitness advice.
         </p>
       </motion.div>
 
@@ -176,6 +233,118 @@ export default function WorkoutPage() {
           delay={0.3}
         />
       </div>
+
+      {/* Log Workout Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700"
+      >
+        <div className="flex items-center gap-2 mb-6">
+          <Dumbbell size={20} className="text-violet-500" />
+          <h3 className="font-bold text-lg text-slate-900 dark:text-white">
+            Log Workout
+          </h3>
+        </div>
+        <form
+          onSubmit={handleLogWorkout}
+          className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end"
+        >
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Type
+            </label>
+            <select
+              value={workoutForm.workoutType}
+              onChange={(e) =>
+                setWorkoutForm({ ...workoutForm, workoutType: e.target.value })
+              }
+              className="w-full bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-violet-500 outline-none text-slate-900 dark:text-white"
+            >
+              {workoutTypes.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Duration (mins)
+            </label>
+            <input
+              type="number"
+              placeholder="e.g., 30"
+              value={workoutForm.duration}
+              onChange={(e) =>
+                setWorkoutForm({ ...workoutForm, duration: e.target.value })
+              }
+              className="w-full bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-violet-500 outline-none text-slate-900 dark:text-white"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">
+              Calories Burned (est.)
+            </label>
+            <input
+              type="number"
+              placeholder="auto-calculated"
+              value={workoutForm.caloriesBurned}
+              onChange={(e) =>
+                setWorkoutForm({
+                  ...workoutForm,
+                  caloriesBurned: e.target.value,
+                })
+              }
+              className="w-full bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-violet-500 outline-none text-slate-900 dark:text-white"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={savingWorkout}
+            className="bg-violet-500 text-white px-6 py-3 rounded-xl text-sm font-semibold hover:bg-violet-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+          >
+            {savingWorkout ? (
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <>
+                <Plus size={16} /> Log
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* Today's Logged Workouts */}
+        {loggedWorkouts.length > 0 && (
+          <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700">
+            <h4 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3 uppercase tracking-wider">
+              Today&apos;s Workouts
+            </h4>
+            <div className="space-y-2">
+              {loggedWorkouts.map((w, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between bg-slate-50 dark:bg-slate-700/30 p-3 rounded-xl"
+                >
+                  <div className="flex items-center gap-3">
+                    <Dumbbell size={16} className="text-violet-500" />
+                    <span className="font-medium text-slate-800 dark:text-white text-sm">
+                      {w.type}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+                    <span>{w.duration} mins</span>
+                    <span>{w.calories_burned} kcal</span>
+                    <span className="text-xs">{w.logged_at}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </motion.div>
 
       <div className="grid lg:grid-cols-3 gap-8">
         <motion.div
@@ -248,12 +417,12 @@ export default function WorkoutPage() {
               </span>
             </div>
 
-            <p className="text-indigo-100 text-sm mb-6 leading-relaxed italic italic">
-              " {aiData.tip} "
+            <p className="text-indigo-100 text-sm mb-6 leading-relaxed italic">
+              &quot;{aiData.tip}&quot;
             </p>
 
             <button
-              onClick={fetchWorkoutAdvice}
+              onClick={fetchWorkoutAdviceManual}
               disabled={loading}
               className="bg-white text-indigo-700 hover:bg-indigo-50 font-bold py-3 px-4 rounded-xl w-full transition-all flex items-center justify-center gap-2 shadow-md active:scale-95"
             >
@@ -274,8 +443,7 @@ export default function WorkoutPage() {
               </h3>
             </div>
             <p className="text-slate-600 dark:text-slate-400 text-sm leading-relaxed">
-              Your recovery rate is slower today. Consider an extra hour of
-              sleep tonight.
+              Log your workouts consistently to improve your health score.
             </p>
           </div>
         </div>
