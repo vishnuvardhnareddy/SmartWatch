@@ -183,10 +183,12 @@ export default function DashboardHome() {
                   foodDesc: input,
                 });
                 if (res.data.status === "success") {
-                  setStats((prev) => ({
-                    ...prev,
-                    total_food_calories: res.data.new_total,
-                  }));
+                  // Refresh full stats from server to get latest data
+                  const email = localStorage.getItem("email") || "demo-user";
+                  const statsRes = await axiosClient.get(
+                    `/user/health-stats/${email}`,
+                  );
+                  setStats(statsRes.data);
                   e.target.reset();
                   alert(
                     `Added ${res.data.added_calories} kcal for your ${mealType}!`,
@@ -216,17 +218,33 @@ export default function DashboardHome() {
             </button>
           </form>
         </div>
-        <div className="flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl min-w-[140px]">
-          <span className="text-slate-500 dark:text-slate-400 text-xs uppercase tracking-wider font-semibold mb-1">
-            Today's Intake
-          </span>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold text-slate-800 dark:text-white">
-              {stats.total_food_calories || 0}
+        <div className="flex flex-col items-center justify-center p-4 bg-slate-50 dark:bg-slate-700/50 rounded-xl min-w-[140px] gap-2">
+          <div className="text-center">
+            <span className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider font-bold block mb-1">
+              Food Intake
             </span>
-            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              kcal
+            <div className="flex items-baseline justify-center gap-1">
+              <span className="text-xl font-bold text-slate-800 dark:text-white">
+                {stats.total_food_calories || 0}
+              </span>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                kcal
+              </span>
+            </div>
+          </div>
+          <div className="w-full h-px bg-slate-200 dark:bg-slate-600"></div>
+          <div className="text-center">
+            <span className="text-slate-500 dark:text-slate-400 text-[10px] uppercase tracking-wider font-bold block mb-1">
+              Water Intake
             </span>
+            <div className="flex items-baseline justify-center gap-1">
+              <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                {stats.water_intake || 0}
+              </span>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                L
+              </span>
+            </div>
           </div>
         </div>
       </motion.div>

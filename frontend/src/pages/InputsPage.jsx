@@ -57,8 +57,18 @@ export default function InputsPage() {
 
     try {
       const res = await axiosClient.post("/analyze-nutrition", payload);
-      localStorage.setItem("dietPlan", JSON.stringify(res.data.plan));
-      navigate("/dashboard/diet");
+      if (res.data.error) {
+        alert(`Analysis issue: ${res.data.error}. Your food has been logged.`);
+      }
+      if (res.data.plan) {
+        localStorage.setItem("dietPlan", JSON.stringify(res.data));
+        navigate("/dashboard/diet");
+      } else {
+        alert(
+          "Food logged successfully! AI analysis may be temporarily unavailable.",
+        );
+        navigate("/dashboard");
+      }
     } catch (err) {
       console.error("Analysis failed:", err);
       alert("AI analysis failed. Please check your connection or try again.");

@@ -52,6 +52,7 @@ export default function HealthInputPage() {
     height: "",
     steps: "",
     workoutTime: "",
+    water: "",
   });
   const [status, setStatus] = useState({ type: "", message: "" });
   const [isSaving, setIsSaving] = useState(false);
@@ -74,6 +75,7 @@ export default function HealthInputPage() {
         weight: formData.weight ? parseFloat(formData.weight) : null,
         steps: formData.steps ? parseInt(formData.steps) : 0,
         workoutTime: formData.workoutTime ? parseInt(formData.workoutTime) : 0,
+        water: formData.water ? parseFloat(formData.water) : 0,
       };
 
       if (formData.height) {
@@ -97,6 +99,7 @@ export default function HealthInputPage() {
           height: "",
           steps: "",
           workoutTime: "",
+          water: "",
         });
       }, 2000);
     } catch (error) {
@@ -196,6 +199,15 @@ export default function HealthInputPage() {
               unit="mins"
               value={formData.workoutTime}
               onChange={(e) => handleChange(e, "workoutTime")}
+            />
+            <InputField
+              icon={Activity}
+              label="Water Intake"
+              type="number"
+              placeholder="e.g., 2.5"
+              unit="Liters"
+              value={formData.water}
+              onChange={(e) => handleChange(e, "water")}
             />
           </div>
         </div>
