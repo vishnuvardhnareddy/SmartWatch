@@ -34,7 +34,7 @@ except Exception as e:
 
 # Gemini Setup
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 app = FastAPI()
 
@@ -86,11 +86,27 @@ def clean_ai_json(text):
     if text.endswith("```"): text = text[:-3]
     return text.strip()
 
+import asyncio
+
 # --- Auth --- (Keep as is)
 class UserSignup(BaseModel):
     name: str
     email: EmailStr
     password: str
+
+# Helper: Run bcrypt in a thread so it doesn't block the async event loop
+async def hash_password(password: str) -> str:
+    password_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt(rounds=4)  # 4 rounds = minimum allowed by bcrypt, fastest possible
+    hashed = await asyncio.to_thread(bcrypt.hashpw, password_bytes, salt)
+    return hashed.decode('utf-8')
+
+async def verify_password(password: str, hashed: str) -> bool:
+    return await asyncio.to_thread(
+        bcrypt.checkpw, 
+        password.encode('utf-8'), 
+        hashed.encode('utf-8')
+    )
 
 @app.post("/signup")
 async def signup(user: UserSignup):
@@ -103,10 +119,8 @@ async def signup(user: UserSignup):
             print(f"Signup Failed: {email_normalized} already exists")
             raise HTTPException(status_code=400, detail="Email exists!")
         
-        # Use direct bcrypt for hashing (more reliable on Render)
-        password_bytes = user.password.encode('utf-8')
-        salt = bcrypt.gensalt(rounds=8)  # 8 rounds = fast on free-tier, still secure (used by many apps)
-        hashed_pwd = bcrypt.hashpw(password_bytes, salt).decode('utf-8')
+        # Hash password in background thread (non-blocking)
+        hashed_pwd = await hash_password(user.password)
         
         result = await user_collection.insert_one({
             "username": user.name, 
@@ -139,12 +153,11 @@ async def login(user: dict = Body(...)):
              print(f"Login Failed: No user found with email '{email}'")
              raise HTTPException(status_code=401, detail="Email not found")
              
-        # Verify password using direct bcrypt
+        # Verify password in background thread (non-blocking)
         stored_password = db_user.get("password", "")
-        password_bytes = password.encode('utf-8')
-        stored_password_bytes = stored_password.encode('utf-8')
+        is_valid = await verify_password(password, stored_password)
         
-        if not bcrypt.checkpw(password_bytes, stored_password_bytes):
+        if not is_valid:
             print(f"Login Failed: Incorrect password for {email}")
             raise HTTPException(status_code=401, detail="Incorrect password")
             
@@ -160,6 +173,7 @@ async def login(user: dict = Body(...)):
         print(f"Login Crash for {email}: {str(e)}")
         return {"status": "error", "message": str(e)}
 
+
 # --- Smart Nutrition Analysis & Storage ---
 @app.post("/analyze-nutrition")
 async def analyze_nutrition(data: dict = Body(...)):
@@ -170,33 +184,55 @@ async def analyze_nutrition(data: dict = Body(...)):
         snacks_text = data.get('snacks', '')
         snacks_line = f", Snacks:{snacks_text}" if snacks_text else ""
         
-        prompt = f"""
-        Analyze Indian meals: Breakfast:{data.get('breakfast')}, Lunch:{data.get('lunch')}, Dinner:{data.get('dinner')}{snacks_line}.
-        Return ONLY JSON:
-        {{
-          "breakfast": {{"items": [], "calories": 0}},
-          "lunch": {{"items": [], "calories": 0}},
-          "dinner": {{"items": [], "calories": 0}},
-          "snacks": {{"items": [], "calories": 0}},
-          "tip": "Sassy Indian health tip"
-        }}
-        """
-        response = model.generate_content(prompt)
-        ai_plan = json.loads(clean_ai_json(response.text))
-        
-        # Calculate total calories from the AI's breakdown
-        total_calories = 0
-        for meal in ['breakfast', 'lunch', 'dinner', 'snacks']:
-            if meal in ai_plan and 'calories' in ai_plan[meal]:
-                try:
-                    total_calories += int(ai_plan[meal]['calories'])
-                except (ValueError, TypeError):
-                    pass
-
         # Save water intake if provided
         water_intake = data.get('water', 0)
+        
+        # Try AI analysis
+        ai_plan = None
+        total_calories = 0
+        try:
+            prompt = f"""
+            You are a nutrition expert. Estimate calories for these Indian meals.
+            Breakfast: {data.get('breakfast') or 'Nothing'}
+            Lunch: {data.get('lunch') or 'Nothing'}
+            Dinner: {data.get('dinner') or 'Nothing'}
+            {f'Snacks: {snacks_text}' if snacks_text else ''}
+            
+            IMPORTANT: You MUST estimate realistic calorie values based on typical Indian serving sizes.
+            For example: 1 idli = ~60 kcal, 1 roti = ~120 kcal, 1 plate rice = ~250 kcal, 1 cup dal = ~150 kcal.
+            Do NOT return 0 calories if food is provided.
+            
+            Return ONLY valid JSON (no markdown, no explanation):
+            {{
+              "breakfast": {{"items": ["item1", "item2"], "calories": 350}},
+              "lunch": {{"items": ["item1", "item2"], "calories": 550}},
+              "dinner": {{"items": ["item1", "item2"], "calories": 400}},
+              "snacks": {{"items": ["item1"], "calories": 150}},
+              "tip": "One short sassy Indian health tip"
+            }}
+            """
+            response = model.generate_content(prompt)
+            ai_plan = json.loads(clean_ai_json(response.text))
+            
+            # Calculate total calories from the AI's breakdown
+            for meal in ['breakfast', 'lunch', 'dinner', 'snacks']:
+                if meal in ai_plan and 'calories' in ai_plan[meal]:
+                    try:
+                        total_calories += int(ai_plan[meal]['calories'])
+                    except (ValueError, TypeError):
+                        pass
+        except Exception as ai_err:
+            print(f"AI Analysis Error (will still save food data): {ai_err}")
+            # Build a basic plan from user inputs even if AI fails
+            ai_plan = {
+                "breakfast": {"items": [data.get('breakfast', '')] if data.get('breakfast') else [], "calories": 0},
+                "lunch": {"items": [data.get('lunch', '')] if data.get('lunch') else [], "calories": 0},
+                "dinner": {"items": [data.get('dinner', '')] if data.get('dinner') else [], "calories": 0},
+                "snacks": {"items": [snacks_text] if snacks_text else [], "calories": 0},
+                "tip": "AI analysis temporarily unavailable. Your food has been logged!"
+            }
 
-        # DB Storage: Update if exists, else create (saves storage)
+        # DB Storage: ALWAYS save, even if AI fails
         await health_collection.update_one(
             {"email": user_email, "date": today},
             {"$set": {
@@ -229,18 +265,28 @@ async def log_meal(data: dict = Body(...)):
 
     try:
         # 1. Ask Gemini to estimate calories
-        prompt = f"""
-        Analyze this {meal_type} meal: {food_desc}.
-        Estimate the total calories.
-        Return ONLY JSON format exactly like this:
-        {{
-            "calories": 450,
-            "items": ["item1", "item2"]
-        }}
-        """
-        response = model.generate_content(prompt)
-        ai_data = json.loads(clean_ai_json(response.text))
-        added_calories = int(ai_data.get('calories', 0))
+        added_calories = 0
+        ai_items = [food_desc]
+        try:
+            prompt = f"""
+            You are a nutrition expert. Estimate calories for this {meal_type} meal: {food_desc}
+            
+            IMPORTANT: Estimate realistic calories based on typical Indian serving sizes.
+            For example: 1 idli = ~60 kcal, 1 dosa = ~150 kcal, 1 banana = ~105 kcal, 1 plate biryani = ~500 kcal.
+            Do NOT return 0 calories.
+            
+            Return ONLY valid JSON (no markdown, no explanation):
+            {{
+                "calories": 350,
+                "items": ["item1", "item2"]
+            }}
+            """
+            response = model.generate_content(prompt)
+            ai_data = json.loads(clean_ai_json(response.text))
+            added_calories = int(ai_data.get('calories', 0))
+            ai_items = ai_data.get('items', [food_desc])
+        except Exception as ai_err:
+            print(f"AI Meal Analysis Error (will still save): {ai_err}")
 
         # 2. Fetch current record to update total
         current_record = await health_collection.find_one({"email": user_email, "date": today})
@@ -255,7 +301,7 @@ async def log_meal(data: dict = Body(...)):
         current_meals[meal_type] = {
              "desc": food_desc,
              "calories": added_calories,
-             "items": ai_data.get('items', [])
+             "items": ai_items
         }
         
         new_total = current_total + added_calories
@@ -368,18 +414,26 @@ async def save_health_inputs(data: dict = Body(...)):
     
     # 2. Save daily health metrics
     try:
+        update_data = {
+            "health_metrics": {
+                "bp": data.get('bp', ""),
+                "sugar": data.get('sugar', ""),
+                "steps": data.get('steps', 0),
+                "workoutTime": data.get('workoutTime', 0),
+                "weight": data.get('weight', "")
+            },
+            "last_updated": datetime.now()
+        }
+        
+        # Add water intake if provided
+        if 'water' in data:
+            update_data["water_intake"] = float(data['water'])
+        elif 'water_intake' in data:
+            update_data["water_intake"] = float(data['water_intake'])
+
         await health_collection.update_one(
             {"email": user_email, "date": today},
-            {"$set": {
-                "health_metrics": {
-                    "bp": data.get('bp', ""),
-                    "sugar": data.get('sugar', ""),
-                    "steps": data.get('steps', 0),
-                    "workoutTime": data.get('workoutTime', 0),
-                    "weight": data.get('weight', "")
-                },
-                "last_updated": datetime.now()
-            }},
+            {"$set": update_data},
             upsert=True
         )
         return {"status": "success", "message": "Health data logged successfully"}
@@ -440,10 +494,22 @@ async def get_diet_plan(email: str):
     today = get_today()
     record = await health_collection.find_one({"email": email, "date": today})
     
-    if record and record.get("ai_diet_plan"):
+    if record:
+        ai_diet_plan = record.get("ai_diet_plan", {})
+        quick_meals = record.get("quick_meals", {})
+        
+        # Merge descriptions if AI plan is missing items but quick meals exist
+        for meal in ['breakfast', 'lunch', 'dinner', 'snacks']:
+            if meal not in ai_diet_plan or not ai_diet_plan[meal].get('items'):
+                if meal in quick_meals:
+                    if meal not in ai_diet_plan:
+                        ai_diet_plan[meal] = {"items": [], "calories": 0}
+                    ai_diet_plan[meal]["items"] = [quick_meals[meal].get("desc", "")]
+                    ai_diet_plan[meal]["calories"] = quick_meals[meal].get("calories", 0)
+
         return {
             "status": "success",
-            "plan": record["ai_diet_plan"],
+            "plan": ai_diet_plan,
             "total_calories": record.get("total_food_calories", 0),
             "water_intake": record.get("water_intake", 0)
         }
@@ -646,7 +712,6 @@ async def send_report(data: dict = Body(...)):
         
         # Health metrics
         metrics = {}
-        health_score = 50
         if user_data:
             metrics = user_data.get("health_metrics", {})
         
@@ -659,16 +724,94 @@ async def send_report(data: dict = Body(...)):
         
         # Food data
         user_inputs = user_data.get("user_inputs", {}) if user_data else {}
-        food_breakfast = user_inputs.get("breakfast", "Not logged")
-        food_lunch = user_inputs.get("lunch", "Not logged")
-        food_dinner = user_inputs.get("dinner", "Not logged")
-        food_snacks = user_inputs.get("snacks", "Not logged")
+        quick_meals = user_data.get("quick_meals", {}) if user_data else {}
+        
+        def get_meal_desc(meal_type):
+            input_desc = user_inputs.get(meal_type)
+            if input_desc:
+                return input_desc
+            if meal_type in quick_meals:
+                return quick_meals[meal_type].get("desc", "Not logged")
+            return "Not logged"
+
+        food_breakfast = get_meal_desc("breakfast")
+        food_lunch = get_meal_desc("lunch")
+        food_dinner = get_meal_desc("dinner")
+        food_snacks = get_meal_desc("snacks")
+        
         total_food_calories = user_data.get("total_food_calories", 0) if user_data else 0
         water_intake = user_data.get("water_intake", 0) if user_data else 0
         
         # Workout data
         workouts = user_data.get("workouts", []) if user_data else []
         total_workout_calories = user_data.get("total_workout_calories", 0) if user_data else 0
+        
+        # --- Calculate calories burned (steps + workout) ---
+        try:
+            steps_int = int(steps) if steps else 0
+        except (ValueError, TypeError):
+            steps_int = 0
+        calories_from_steps = int(steps_int * 0.04)
+        total_calories_burned = calories_from_steps + int(total_workout_calories)
+        
+        # --- Calculate Health Score ---
+        try:
+            active_time = int(workout_time) if workout_time else int(steps_int // 100)
+        except (ValueError, TypeError):
+            active_time = int(steps_int // 100)
+        
+        bp_str = bp if bp and bp != "Not logged" else "120/80"
+        try:
+            sugar_int = int(sugar) if sugar and sugar != "Not logged" else 100
+        except (ValueError, TypeError):
+            sugar_int = 100
+            
+        bmi = None
+        if height and height != "Not logged" and weight and weight != "Not logged":
+            try:
+                h_meters = float(height) / 100
+                w_kg = float(weight)
+                bmi = round(w_kg / (h_meters * h_meters), 1)
+            except (ValueError, TypeError):
+                bmi = None
+
+        health_score = 50
+        if health_score_model is not None:
+            try:
+                bp_parts = bp_str.split('/')
+                sys_bp = int(bp_parts[0]) if len(bp_parts) == 2 else 120
+                dia_bp = int(bp_parts[1]) if len(bp_parts) == 2 else 80
+                features = [[sys_bp, dia_bp, sugar_int, steps_int, active_time]]
+                predicted_score = health_score_model.predict(features)[0]
+                health_score = int(np.clip(predicted_score, 0, 100))
+            except Exception as e:
+                print(f"ML Prediction Error in report: {e}")
+                health_score = _calculate_rule_based_score(steps_int, active_time, bp_str, sugar_int, total_food_calories, water_intake, bmi)
+        else:
+            health_score = _calculate_rule_based_score(steps_int, active_time, bp_str, sugar_int, total_food_calories, water_intake, bmi)
+        
+        # Health Score color
+        if health_score >= 80:
+            score_color = "#10b981"
+            score_label = "Excellent"
+        elif health_score >= 60:
+            score_color = "#f59e0b"
+            score_label = "Good"
+        else:
+            score_color = "#ef4444"
+            score_label = "Needs Improvement"
+        
+        # Calorie balance
+        net_calories = int(total_food_calories) - total_calories_burned
+        if net_calories > 0:
+            balance_text = f"+{net_calories} kcal surplus"
+            balance_color = "#ef4444"
+        elif net_calories < 0:
+            balance_text = f"{net_calories} kcal deficit"
+            balance_color = "#10b981"
+        else:
+            balance_text = "Balanced"
+            balance_color = "#64748b"
         
         # Build workout rows for email
         workout_rows = ""
@@ -690,15 +833,16 @@ async def send_report(data: dict = Body(...)):
             
             Health: BP={bp}, Sugar={sugar}, Steps={steps}, Workout={workout_time}min, Weight={weight}kg, Height={height}cm
             Food: Breakfast={food_breakfast}, Lunch={food_lunch}, Dinner={food_dinner}, Snacks={food_snacks}
-            Total Calories Eaten: {total_food_calories}, Water: {water_intake}L
-            Workout Calories Burned: {total_workout_calories}
+            Total Calories Eaten: {total_food_calories}, Calories Burned: {total_calories_burned}, Net: {net_calories}
+            Water: {water_intake}L, Health Score: {health_score}/100, BMI: {bmi}
             
-            Give response in this format (plain text, 4-5 lines max):
-            - Line 1: Overall assessment (1 sentence)
-            - Line 2: What to improve
-            - Line 3: What to avoid in food
-            - Line 4: Exercise recommendation
-            - Line 5: Motivational tip
+            Give response in this format (plain text, 5-6 lines max):
+            - Line 1: Overall assessment based on health score ({health_score}/100)
+            - Line 2: Calorie balance analysis ({total_food_calories} eaten vs {total_calories_burned} burned)
+            - Line 3: What to improve in diet
+            - Line 4: Exercise recommendation based on current activity
+            - Line 5: Hydration assessment ({water_intake}L water)
+            - Line 6: Motivational tip
             """
             ai_response = model.generate_content(ai_prompt)
             ai_summary = ai_response.text.strip()
@@ -720,6 +864,38 @@ async def send_report(data: dict = Body(...)):
             
             <div style='padding:24px;'>
                 
+                <!-- Health Score Banner -->
+                <div style='text-align:center;margin-bottom:24px;padding:20px;background:linear-gradient(135deg,{score_color}15,{score_color}08);border:2px solid {score_color};border-radius:16px;'>
+                    <p style='margin:0 0 4px;color:#64748b;font-size:13px;text-transform:uppercase;letter-spacing:1px;font-weight:600;'>Your Health Score</p>
+                    <p style='margin:0;font-size:48px;font-weight:800;color:{score_color};'>{health_score}</p>
+                    <p style='margin:4px 0 0;font-size:14px;color:{score_color};font-weight:600;'>{score_label}</p>
+                </div>
+                
+                <!-- Calorie Balance Card -->
+                <div style='margin-bottom:24px;background:#f8fafc;border-radius:12px;padding:20px;border:1px solid #e2e8f0;'>
+                    <h2 style='color:#0f172a;font-size:18px;margin:0 0 16px;text-align:center;'>⚖️ Calorie Balance</h2>
+                    <table style='width:100%;border-collapse:collapse;'>
+                        <tr>
+                            <td style='text-align:center;padding:12px;width:40%;'>
+                                <p style='margin:0;font-size:12px;color:#64748b;text-transform:uppercase;font-weight:600;'>Intake</p>
+                                <p style='margin:4px 0 0;font-size:28px;font-weight:800;color:#ef4444;'>{total_food_calories}</p>
+                                <p style='margin:0;font-size:12px;color:#64748b;'>kcal eaten</p>
+                            </td>
+                            <td style='text-align:center;padding:12px;width:20%;'>
+                                <p style='font-size:24px;color:#94a3b8;margin:0;'>vs</p>
+                            </td>
+                            <td style='text-align:center;padding:12px;width:40%;'>
+                                <p style='margin:0;font-size:12px;color:#64748b;text-transform:uppercase;font-weight:600;'>Burned</p>
+                                <p style='margin:4px 0 0;font-size:28px;font-weight:800;color:#10b981;'>{total_calories_burned}</p>
+                                <p style='margin:0;font-size:12px;color:#64748b;'>kcal burned</p>
+                            </td>
+                        </tr>
+                    </table>
+                    <div style='text-align:center;margin-top:12px;padding:8px;background:white;border-radius:8px;border:1px solid #e2e8f0;'>
+                        <p style='margin:0;font-size:14px;font-weight:700;color:{balance_color};'>Net: {balance_text}</p>
+                    </div>
+                </div>
+                
                 <!-- Health Log -->
                 <div style='margin-bottom:24px;'>
                     <h2 style='color:#0f172a;font-size:18px;margin:0 0 12px;border-bottom:2px solid #10b981;padding-bottom:6px;'>❤️ Health Log</h2>
@@ -729,6 +905,7 @@ async def send_report(data: dict = Body(...)):
                         <tr><td style='padding:6px 0;color:#64748b;'>Weight</td><td style='padding:6px 0;color:#0f172a;font-weight:600;'>{weight} {'kg' if weight != 'Not logged' else ''}</td></tr>
                         <tr><td style='padding:6px 0;color:#64748b;'>Steps</td><td style='padding:6px 0;color:#0f172a;font-weight:600;'>{steps}</td></tr>
                         <tr><td style='padding:6px 0;color:#64748b;'>Water Intake</td><td style='padding:6px 0;color:#0f172a;font-weight:600;'>{water_intake} L</td></tr>
+                        <tr><td style='padding:6px 0;color:#64748b;'>BMI</td><td style='padding:6px 0;color:#0f172a;font-weight:600;'>{bmi if bmi else 'Not available'}</td></tr>
                     </table>
                 </div>
                 
@@ -755,7 +932,7 @@ async def send_report(data: dict = Body(...)):
                         </tr>
                         {workout_rows}
                     </table>
-                    <p style='margin:8px 0 0;color:#64748b;font-size:13px;'>Total Workout Calories Burned: <strong style='color:#8b5cf6;'>{total_workout_calories} kcal</strong></p>
+                    <p style='margin:8px 0 0;color:#64748b;font-size:13px;'>Total Workout Calories Burned: <strong style='color:#8b5cf6;'>{total_workout_calories} kcal</strong> | Steps Calories: <strong style='color:#8b5cf6;'>{calories_from_steps} kcal</strong></p>
                 </div>
                 
                 <!-- AI Summary -->
@@ -771,6 +948,7 @@ async def send_report(data: dict = Body(...)):
             </div>
         </div>
         """
+
         
         # 4. Send via Resend
         params = {
